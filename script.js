@@ -4,12 +4,12 @@
 // 🚨 [중요] 1단계에서 복사한 본인의 키값으로 아래 내용을 바꿔주세요!
 // =========================================================
 const firebaseConfig = {
-  apiKey: "AIzaSyD4m17c3vdKM4p1c0sp0CJ6fetUwf5A0xA",
-  authDomain: "pharmacy-sch-251127.firebaseapp.com",
-  projectId: "pharmacy-sch-251127",
-  storageBucket: "pharmacy-sch-251127.firebasestorage.app",
-  messagingSenderId: "1028219799154",
-  appId: "1:1028219799154:web:fc827339b83fdd868f64eb"
+  apiKey: "AIzaSyCA4YDq6iG9IkMIx5vwtDQalIvt8ijpGvc",
+  authDomain: "pharmacy-sch-sw.firebaseapp.com",
+  projectId: "pharmacy-sch-sw",
+  storageBucket: "pharmacy-sch-sw.firebasestorage.app",
+  messagingSenderId: "191050559192",
+  appId: "1:191050559192:web:e3eeaa2fd2fb879cd731ad"
 };
 
 
@@ -470,3 +470,4 @@ window.onclick = function(e) {
     if (e.target == settingsModal) closeSettingsModal();
 
 }
+
