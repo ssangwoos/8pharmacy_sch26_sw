@@ -9,7 +9,7 @@ const firebaseConfig = {
   projectId: "pharmacy-sch-251127",
   storageBucket: "pharmacy-sch-251127.firebasestorage.app",
   messagingSenderId: "1028219799154",
-  appId: "1:1028219799154:web:669dc1a10e7a1f5f8f64eb"
+  appId: "1:1028219799154:web:fc827339b83fdd868f64eb"
 };
 
 
@@ -468,4 +468,5 @@ window.onclick = function(e) {
     if (e.target == statsModal) closeStatsModal();
     if (e.target == pwModal) closePasswordModal();
     if (e.target == settingsModal) closeSettingsModal();
+
 }
