@@ -4,534 +4,541 @@
 // 🚨 [중요] 1단계에서 복사한 본인의 키값으로 아래 내용을 바꿔주세요!
 // =========================================================
 const firebaseConfig = {
-  apiKey: "AIzaSyCA4YDq6iG9IkMIx5vwtDQalIvt8ijpGvc",
-  authDomain: "pharmacy-sch-sw.firebaseapp.com",
-  projectId: "pharmacy-sch-sw",
-  storageBucket: "pharmacy-sch-sw.firebasestorage.app",
-  messagingSenderId: "191050559192",
-  appId: "1:191050559192:web:e3eeaa2fd2fb879cd731ad"
+  apiKey: "AIzaSyD4m17c3vdKM4p1c0sp0CJ6fetUwf5A0xA",
+  authDomain: "pharmacy-sch-251127.firebaseapp.com",
+  projectId: "pharmacy-sch-251127",
+  storageBucket: "pharmacy-sch-251127.firebasestorage.app",
+  messagingSenderId: "1028219799154",
+  appId: "1:1028219799154:web:669dc1a10e7a1f5f8f64eb"
 };
 
-/* style.css : 2025-11-28 최종 통합 완전판 */
 
-/* =========================================
-   1. 기본 변수 및 초기화
-   ========================================= */
-:root {
-    --bg-color: #f4f7f6;       /* 전체 배경색 */
-    --card-bg: #ffffff;        /* 카드 배경색 */
-    --border-color: #e0e0e0;   /* 테두리 색 */
+
+// --- 파이어베이스 초기화 ---
+firebase.initializeApp(firebaseConfig);
+const db = firebase.firestore();
+
+// --- 전역 변수 ---
+const SUPER_PW = "dpdlxmqbxl1*";
+let config = { pharmacyName: "로딩중...", password: "0000" };
+let employees = [];
+let schedules = [];
+let specialDays = []; // ★ 추가된 변수: 빨간날 저장용
+
+let currentDate = new Date();
+let activeEmployeeId = null;
+let selectedDate = null;
+let editingScheduleId = null;
+
+// DOM 요소
+const calendarGrid = document.getElementById('calendar');
+const currentMonthDisplay = document.getElementById('current-month');
+const employeeListEl = document.getElementById('employee-list');
+const mainTitle = document.getElementById('main-title');
+
+// 모달
+const shiftModal = document.getElementById('shift-modal');
+const statsModal = document.getElementById('stats-modal');
+const pwModal = document.getElementById('password-modal');
+const settingsModal = document.getElementById('settings-modal');
+
+// --- 초기 실행 ---
+initTimeOptions();
+listenToData(); 
+
+// ==========================================
+// 파이어베이스 실시간 리스너
+// ==========================================
+function listenToData() {
+    // 1. 환경설정
+    db.collection('settings').doc('config').onSnapshot((doc) => {
+        if (doc.exists) { config = doc.data(); }
+        else {
+            config = { pharmacyName: "에이트약국", password: "0000" };
+            db.collection('settings').doc('config').set(config);
+        }
+        updateTitle();
+    });
+
+    // 2. 직원 목록
+    db.collection('employees').onSnapshot((snapshot) => {
+        employees = [];
+        snapshot.forEach((doc) => { employees.push({ id: doc.id, ...doc.data() }); });
+        employees.sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+        renderEmployees();
+        renderSettingsEmployees();
+        renderCalendar();
+    });
+
+    // 3. 스케줄
+    db.collection('schedules').onSnapshot((snapshot) => {
+        schedules = [];
+        snapshot.forEach((doc) => { schedules.push({ id: doc.id, ...doc.data() }); });
+        renderCalendar();
+    });
+
+    // ★ 4. 빨간날(휴일) 목록 듣기 (추가됨)
+    db.collection('specialDays').onSnapshot((snapshot) => {
+        specialDays = [];
+        snapshot.forEach((doc) => {
+            specialDays.push(doc.id); // 문서 ID 자체가 날짜(YYYY-MM-DD)
+        });
+        renderCalendar(); // 목록 바뀌면 달력 다시 그림
+    });
+}
+
+// ---------------------------
+// 기본 로직
+// ---------------------------
+function updateTitle() { mainTitle.innerText = `${config.pharmacyName} 근무 스케줄 🗓️`; }
+
+function initTimeOptions() {
+    const hours = document.querySelectorAll('#start-hour, #end-hour');
+    const mins = document.querySelectorAll('#start-min, #end-min');
+    hours.forEach(sel => {
+        sel.innerHTML = "";
+        for(let i=0; i<=24; i++) { sel.innerHTML += `<option value="${String(i).padStart(2,'0')}">${String(i).padStart(2,'0')}</option>`; }
+    });
+    mins.forEach(sel => {
+        sel.innerHTML = "";
+        for(let i=0; i<60; i+=10) { sel.innerHTML += `<option value="${String(i).padStart(2,'0')}">${String(i).padStart(2,'0')}</option>`; }
+    });
+}
+
+function renderEmployees() {
+    employeeListEl.innerHTML = "";
+    const modalSelect = document.getElementById('modal-emp-select');
+    modalSelect.innerHTML = '<option value="">선택하세요</option>';
     
-    --primary-color: #4a90e2;  /* 메인 강조색 (파랑) */
-    --success-color: #5cb85c;  /* 저장/추가 (초록) */
-    --danger-color: #e74c3c;   /* 삭제/취소 (빨강) */
-    --text-color: #333333;     /* 기본 글자색 */
-    --input-bg: #f9f9f9;       /* 입력창 배경 */
-    
-    --sunday-color: #ff6b6b;   /* 일요일 색 */
-    --saturday-color: #4a90e2; /* 토요일 색 */
+    employees.forEach(emp => {
+        const li = document.createElement('li');
+        li.className = 'employee-item';
+        li.textContent = emp.name;
+        li.style.backgroundColor = emp.color;
+        li.onclick = () => {
+            if (activeEmployeeId === emp.id) { activeEmployeeId = null; resetHighlights(); }
+            else { activeEmployeeId = emp.id; highlightEmployee(emp.id); }
+        };
+        employeeListEl.appendChild(li);
+        const opt = document.createElement('option');
+        opt.value = emp.id; opt.textContent = emp.name;
+        modalSelect.appendChild(opt);
+    });
 }
 
-* {
-    box-sizing: border-box;
-}
+function renderCalendar() {
+    calendarGrid.innerHTML = `
+        <div class="day-header sun">일</div><div class="day-header">월</div><div class="day-header">화</div><div class="day-header">수</div><div class="day-header">목</div><div class="day-header">금</div><div class="day-header sat">토</div>
+    `;
+    const year = currentDate.getFullYear();
+    const month = currentDate.getMonth();
+    currentMonthDisplay.innerText = `${year}년 ${month + 1}월`;
+    const firstDay = new Date(year, month, 1).getDay();
+    const lastDate = new Date(year, month + 1, 0).getDate();
 
-body {
-    font-family: 'Noto Sans KR', sans-serif;
-    background-color: var(--bg-color);
-    color: var(--text-color);
-    margin: 0;
-    padding: 20px;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    min-height: 100vh;
-}
-
-/* =========================================
-   2. 상단 헤더 영역
-   ========================================= */
-.main-header {
-    width: 100%;
-    max-width: 1600px;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 20px;
-}
-
-#main-title {
-    font-size: 2rem;
-    font-weight: 700;
-    color: #2c3e50;
-    margin: 0;
-    word-break: keep-all; 
-}
-
-.btn-settings {
-    background: white;
-    border: 1px solid #ddd;
-    padding: 10px 15px;
-    border-radius: 8px;
-    cursor: pointer;
-    font-size: 1rem;
-    font-weight: bold;
-    color: #555;
-    box-shadow: 0 2px 5px rgba(0,0,0,0.05);
-    transition: all 0.2s;
-    white-space: nowrap;
-}
-
-.btn-settings:hover {
-    background: #eee;
-    transform: translateY(-2px);
-}
-
-/* =========================================
-   3. 메인 레이아웃 (달력 + 사이드바)
-   ========================================= */
-.main-container {
-    display: flex;
-    gap: 20px;
-    width: 100%;
-    max-width: 1600px;
-    background: var(--card-bg);
-    padding: 20px;
-    border-radius: 15px;
-    box-shadow: 0 4px 15px rgba(0,0,0,0.05);
-}
-
-/* --- 왼쪽: 달력 섹션 --- */
-.calendar-section {
-    flex: 3;
-}
-
-.header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 20px;
-}
-
-.year-month {
-    font-size: 1.8rem;
-    font-weight: bold;
-}
-
-.btn-nav {
-    padding: 8px 16px;
-    border: none;
-    border-radius: 6px;
-    background-color: #20c997;
-    color: white;
-    font-weight: bold;
-    cursor: pointer;
-    font-size: 0.95rem;
-    transition: opacity 0.2s;
-}
-.btn-nav:hover { opacity: 0.9; }
-
-/* 달력 그리드 */
-.calendar-grid {
-    display: grid;
-    grid-template-columns: repeat(7, 1fr);
-    border-top: 1px solid var(--border-color);
-    border-left: 1px solid var(--border-color);
-}
-
-.day-header {
-    background: #f8f9fa;
-    padding: 10px;
-    text-align: center;
-    font-weight: bold;
-    border-right: 1px solid var(--border-color);
-    border-bottom: 1px solid var(--border-color);
-}
-.day-header.sun { color: var(--sunday-color); }
-.day-header.sat { color: var(--saturday-color); }
-
-.day-cell {
-    min-height: 120px;
-    border-right: 1px solid var(--border-color);
-    border-bottom: 1px solid var(--border-color);
-    padding: 5px;
-    position: relative;
-    cursor: pointer;
-    background: white;
-    transition: background-color 0.2s;
-}
-.day-cell:hover { background-color: #fafafa; }
-.day-cell.empty { background-color: #fcfcfc; cursor: default; }
-
-/* 날짜 숫자 */
-.date-num {
-    font-size: 0.9rem;
-    margin-bottom: 5px;
-    display: inline-block;
-    width: 24px;
-    height: 24px;
-    text-align: center;
-    line-height: 24px;
-    border-radius: 50%;
-}
-.day-cell.holiday .date-num { color: var(--sunday-color) !important; font-weight: bold; }
-.day-cell.sun .date-num { color: var(--sunday-color); }
-.day-cell.sat .date-num { color: var(--saturday-color); }
-
-/* 근무 바 */
-.shift-bar {
-    font-size: 0.75rem;
-    color: white;
-    padding: 3px 6px;
-    border-radius: 4px;
-    margin-bottom: 2px;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    cursor: pointer;
-    transition: transform 0.1s, box-shadow 0.1s;
-    font-weight: 500;
-}
-.shift-bar:hover {
-    transform: scale(1.02);
-    z-index: 10;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.2);
-}
-
-/* --- 오른쪽: 사이드바 --- */
-.sidebar-section {
-    flex: 1;
-    min-width: 250px;
-    border-left: 1px solid #eee;
-    padding-left: 20px;
-}
-
-.sidebar-title {
-    font-size: 1.2rem;
-    font-weight: bold;
-    margin-bottom: 15px;
-}
-
-.employee-list { list-style: none; padding: 0; }
-
-.employee-item {
-    padding: 12px;
-    margin-bottom: 8px;
-    border-radius: 8px;
-    color: white;
-    font-weight: bold;
-    cursor: pointer;
-    text-align: center;
-    transition: opacity 0.2s, transform 0.2s;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-}
-.employee-item:hover { opacity: 0.9; transform: translateY(-1px); }
-
-/* =========================================
-   4. 모달 (팝업창) 공통 스타일
-   ========================================= */
-.modal {
-    display: none;
-    position: fixed;
-    z-index: 1000;
-    left: 0;
-    top: 0;
-    width: 100%;
-    height: 100%;
-    background-color: rgba(0,0,0,0.5);
-    backdrop-filter: blur(2px);
-}
-
-.modal-content {
-    background-color: white;
-    margin: 5% auto;
-    padding: 30px;
-    border-radius: 12px;
-    width: 90%;
-    max-width: 480px;
-    box-shadow: 0 10px 25px rgba(0,0,0,0.2);
-    position: relative;
-    animation: slideDown 0.3s ease-out;
-}
-
-@keyframes slideDown {
-    from { transform: translateY(-20px); opacity: 0; }
-    to { transform: translateY(0); opacity: 1; }
-}
-
-.close-btn {
-    position: absolute;
-    top: 15px;
-    right: 20px;
-    font-size: 28px;
-    font-weight: bold;
-    cursor: pointer;
-    color: #aaa;
-}
-.close-btn:hover { color: #333; }
-
-/* =========================================
-   5. 입력 폼 (Form) 스타일
-   ========================================= */
-.form-group { margin-bottom: 15px; }
-
-.form-group label {
-    display: block;
-    margin-bottom: 8px;
-    font-weight: bold;
-    color: #444;
-    font-size: 0.95rem;
-}
-
-select, input[type="text"], input[type="date"], input[type="password"], input[type="color"], textarea {
-    width: 100%;
-    padding: 12px;
-    border: 1px solid #ddd;
-    border-radius: 6px;
-    background-color: var(--input-bg);
-    font-size: 1rem;
-    outline: none;
-    font-family: 'Noto Sans KR', sans-serif;
-}
-
-select:focus, input:focus, textarea:focus {
-    border-color: var(--primary-color);
-    background-color: #fff;
-    box-shadow: 0 0 0 2px rgba(74, 144, 226, 0.2);
-}
-
-input[readonly] { background-color: #eee; color: #777; }
-textarea { resize: vertical; min-height: 80px; }
-
-.time-select-row { display: flex; align-items: center; gap: 10px; }
-.time-select-row select { width: 48%; }
-
-.checkbox-wrapper {
-    display: flex;
-    align-items: center;
-    margin-top: 15px;
-    padding-top: 15px;
-    border-top: 1px dashed #eee;
-}
-input[type="checkbox"] { width: 20px; height: 20px; margin-right: 8px; cursor: pointer; }
-
-/* 버튼 그룹 */
-.btn-group { display: flex; gap: 10px; margin-top: 25px; }
-
-.btn-save {
-    flex: 1;
-    padding: 15px;
-    background-color: var(--success-color);
-    color: white;
-    border: none;
-    border-radius: 6px;
-    font-size: 1.1rem;
-    font-weight: bold;
-    cursor: pointer;
-}
-.btn-save:hover { background-color: #4cae4c; }
-
-.btn-delete {
-    width: 60px;
-    background-color: var(--danger-color);
-    color: white;
-    border: none;
-    border-radius: 6px;
-    font-size: 1.2rem;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-}
-.btn-delete:hover { background-color: #c0392b; }
-
-/* =========================================
-   6. 통계 모달 스타일 (리포트용 압축 버전)
-   ========================================= */
-#stats-modal .modal-content {
-    max-width: 1000px;
-    width: 95%;
-    padding: 15px;
-    margin: 2% auto;
-}
-
-#stats-table-container { margin-top: 10px; }
-
-.stats-table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 0.85rem;
-}
-
-.stats-table th {
-    background-color: #f1f3f5;
-    position: sticky; top: 0; z-index: 1;
-    font-weight: bold; color: #444;
-    padding: 6px 4px;
-    border-bottom: 2px solid #ccc;
-}
-
-.stats-table td {
-    padding: 4px 4px;
-    text-align: center;
-    border-bottom: 1px solid #eee;
-    color: #333;
-    height: 30px;
-}
-
-.stats-day.sun { color: var(--sunday-color); font-weight: bold; }
-.stats-day.sat { color: var(--saturday-color); font-weight: bold; }
-
-.report-summary {
-    margin-top: 10px;
-    padding: 10px 15px;
-    background-color: #fcfcfc;
-    border: 1px solid #eee;
-    border-radius: 4px;
-    display: flex; flex-direction: column; gap: 5px;
-}
-.report-summary h3 { font-size: 1rem; margin: 0 0 5px 0; color: #333; }
-.report-summary ul { list-style: none; padding: 0; margin: 0; display: flex; gap: 20px; }
-.report-summary li { font-size: 0.9rem; color: #555; margin: 0; }
-.report-total { margin-top: 5px; padding-top: 5px; border-top: 1px dashed #ddd; font-size: 1.1rem; font-weight: bold; color: var(--primary-color); text-align: right; }
-
-#stats-period { margin-bottom: 10px; font-size: 1rem; font-weight: bold; color: #555; }
-#stats-emp-select { padding: 5px; font-size: 0.9rem; height: 35px; }
-
-/* =========================================
-   7. 환경설정 (직원 관리) 스타일
-   ========================================= */
-/* 환경설정 모달 창 확장 */
-#settings-modal .modal-content {
-    max-width: 600px;
-    height: 90vh; /* PC에서도 길게 */
-    display: flex;
-    flex-direction: column;
-    padding: 25px;
-}
-
-/* 내부 영역 설정 */
-#settings-modal .settings-section { flex: none; }
-#settings-modal .settings-section:last-of-type {
-    flex: 1; /* 남은 공간 다 차지 */
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-    margin-bottom: 10px;
-}
-
-/* PC용 직원 목록 스타일 (높이 강제 지정 버전) */
-.emp-manage-list {
-    /* flex: 1;  <-- 이거 지우세요! 이게 문제였을 수 있습니다. */
-    
-    height: 400px; /* ★ 핵심: 높이를 400px로 강하게 고정 (5~6명 충분히 보임) */
-    
-    overflow-y: auto;
-    border: 1px solid #ddd;
-    border-radius: 6px;
-    padding: 10px;
-    background: white;
-}
-.emp-manage-item {
-    display: flex; align-items: center; gap: 10px;
-    margin-bottom: 10px; padding-bottom: 10px;
-    border-bottom: 1px solid #f0f0f0;
-}
-.emp-manage-item:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
-
-/* 색상 선택기 확대 */
-.emp-manage-item input[type="color"] {
-    width: 40px !important;
-    height: 40px !important;
-    padding: 2px;
-    border: none;
-    border-radius: 4px;
-    cursor: pointer;
-}
-
-.emp-add-row { display: flex; gap: 10px; margin-top: 5px; }
-/* 삭제 버튼 스타일 (수정됨) */
-.btn-sm-del {
-    background: var(--sunday-color);
-    color: white;
-    border: none;
-    border-radius: 4px;
-    
-    /* 상하 패딩을 8px -> 4px로 줄여서 납작하게 만듭니다 */
-    padding: 4px 10px; 
-    
-    cursor: pointer;
-    font-size: 0.85rem;
-}
-
-/* =========================================
-   🚨 8. 모바일 반응형 (화면 폭 768px 이하)
-   ========================================= */
-@media screen and (max-width: 768px) {
-    body { padding: 10px; }
-    #main-title { font-size: 1.5rem; }
-
-    /* 레이아웃 세로 정렬 */
-    .main-container { flex-direction: column; padding: 10px; gap: 15px; }
-    .calendar-section, .sidebar-section { width: 100%; flex: none; }
-    .sidebar-section { border-left: none; border-top: 2px solid #eee; padding-left: 0; padding-top: 20px; }
-
-    /* 달력 요소 크기 축소 */
-    .header { margin-bottom: 10px; }
-    .year-month { font-size: 1.3rem; }
-    .btn-nav { padding: 6px 10px; font-size: 0.85rem; }
-    .day-cell { min-height: 80px; padding: 2px; }
-    .date-num { font-size: 0.8rem; width: 20px; height: 20px; line-height: 20px; }
-    .shift-bar { font-size: 0.7rem; padding: 2px 4px; margin-bottom: 1px; }
-    .day-header { padding: 5px; font-size: 0.85rem; }
-
-    /* 🚨 모달 창 스타일 (중앙 정렬) */
-    .modal { align-items: center; justify-content: center; }
-    .modal[style*="display: block"] { display: flex !important; }
-
-    .modal-content {
-        width: 95%; margin: 0; padding: 20px;
-        max-height: 90vh; overflow-y: auto;
-        display: flex; flex-direction: column;
+    for (let i = 0; i < firstDay; i++) {
+        const div = document.createElement('div'); div.className = 'day-cell empty'; calendarGrid.appendChild(div);
     }
 
-    /* 🚨 환경설정 모달 높이 강제 지정 */
-    #settings-modal .modal-content { height: 85vh; }
+    for (let i = 1; i <= lastDate; i++) {
+        const cell = document.createElement('div'); cell.className = 'day-cell';
+        const dateKey = `${year}-${String(month+1).padStart(2,'0')}-${String(i).padStart(2,'0')}`;
+        
+        // ★ 빨간날 체크 로직 추가
+        if (specialDays.includes(dateKey)) {
+            cell.classList.add('holiday');
+        }
 
-    /* 🚨 직원 목록 리스트 강제 확장 */
-    .emp-manage-list {
-        flex: 1; /* 남은 공간 채우기 */
-        min-height: 300px; /* 최소 확보 */
-        max-height: none;
-        overflow-y: auto;
+        const dateNum = document.createElement('div'); 
+        dateNum.className = 'date-num'; 
+        dateNum.innerText = i;
+        
+        // ★ 클릭 시 DB 토글 함수 호출로 변경
+        dateNum.onclick = (e) => { 
+            e.stopPropagation(); 
+            toggleHoliday(dateKey); 
+        };
+        
+        cell.appendChild(dateNum);
+        
+        const dayOfWeek = new Date(year, month, i).getDay();
+        if(dayOfWeek === 0) cell.classList.add('sun'); if(dayOfWeek === 6) cell.classList.add('sat');
+        
+        cell.onclick = (e) => { if(e.target === cell || e.target === dateNum) openAddModal(dateKey); };
+
+        let todaysSchedules = schedules.filter(s => s.date === dateKey);
+        todaysSchedules.sort((a, b) => {
+            if (!a.startTime) return -1; if (!b.startTime) return 1;
+            return a.startTime.localeCompare(b.startTime);
+        });
+
+        todaysSchedules.forEach(sch => {
+            const emp = employees.find(e => e.id == sch.empId);
+            if(emp) {
+                const bar = document.createElement('div');
+                bar.className = 'shift-bar';
+                bar.style.backgroundColor = emp.color; 
+                bar.dataset.empId = emp.id; 
+                if(sch.memo) bar.title = sch.memo; 
+
+                if(sch.type === '휴무') bar.innerText = `[휴무] ${emp.name}`;
+                else if(sch.type === '휴가') bar.innerText = `[휴가] ${emp.name}`;
+                else bar.innerText = `${emp.name} (${sch.startTime}~${sch.endTime})`;
+                
+                bar.onclick = (e) => { e.stopPropagation(); openEditModal(sch); };
+                cell.appendChild(bar);
+            }
+        });
+        calendarGrid.appendChild(cell);
+    }
+    if(activeEmployeeId) highlightEmployee(activeEmployeeId);
+}
+
+// ★ [신규 함수] 빨간날 토글 (DB 저장/삭제)
+function toggleHoliday(dateStr) {
+    if (specialDays.includes(dateStr)) {
+        // 이미 있으면 삭제 (검은날로 복귀)
+        db.collection('specialDays').doc(dateStr).delete();
+    } else {
+        // 없으면 추가 (빨간날로 지정)
+        db.collection('specialDays').doc(dateStr).set({ type: 'holiday' });
+    }
+}
+
+// ---------------------------
+// 모달 및 DB 저장 로직 (기존 동일)
+// ---------------------------
+function openAddModal(dateStr) {
+    editingScheduleId = null; selectedDate = dateStr;
+    document.getElementById('modal-title').innerText = `${dateStr} 근무 추가`;
+    document.getElementById('modal-date-display').value = dateStr;
+    document.getElementById('modal-emp-select').value = ""; 
+    document.getElementById('modal-shift-type').value = "주간";
+    document.getElementById('modal-memo').value = ""; 
+    document.getElementById('repeat-check').checked = false; 
+    document.getElementById('repeat-section').style.display = "flex";
+    document.getElementById('btn-delete').style.display = "none";
+    document.getElementById('start-hour').value = "09"; document.getElementById('start-min').value = "00";
+    document.getElementById('end-hour').value = "18"; document.getElementById('end-min').value = "00";
+    document.getElementById('end-date').value = dateStr;
+    toggleInputs(); shiftModal.style.display = 'block';
+}
+function openEditModal(sch) {
+    editingScheduleId = sch.id; selectedDate = sch.date;
+    document.getElementById('modal-title').innerText = `${sch.date} 근무 수정`;
+    document.getElementById('modal-date-display').value = sch.date;
+    document.getElementById('btn-delete').style.display = "flex"; 
+    document.getElementById('repeat-section').style.display = "none";
+    document.getElementById('modal-emp-select').value = sch.empId;
+    document.getElementById('modal-shift-type').value = sch.type;
+    document.getElementById('modal-memo').value = sch.memo || ""; 
+    toggleInputs();
+    if(sch.type !== '휴가' && sch.type !== '휴무') {
+        const [sh, sm] = sch.startTime.split(':'); const [eh, em] = sch.endTime.split(':');
+        document.getElementById('start-hour').value = sh; document.getElementById('start-min').value = sm;
+        document.getElementById('end-hour').value = eh; document.getElementById('end-min').value = em;
+    }
+    if(sch.type === '휴가') { document.getElementById('end-date').value = sch.date; }
+    shiftModal.style.display = 'block';
+}
+function closeModal() { shiftModal.style.display = 'none'; }
+function toggleInputs() {
+    const val = document.getElementById('modal-shift-type').value;
+    const timeSec = document.getElementById('time-input-section');
+    const dateSec = document.getElementById('date-range-section');
+    timeSec.style.display = (val === '주간' || val === '마감') ? 'block' : 'none';
+    dateSec.style.display = (val === '휴가') ? 'block' : 'none';
+}
+
+function saveSchedule() {
+    const empId = document.getElementById('modal-emp-select').value;
+    if(!empId) return alert("이름을 선택해주세요.");
+    const type = document.getElementById('modal-shift-type').value;
+    const memo = document.getElementById('modal-memo').value; 
+    const isRepeat = document.getElementById('repeat-check').checked;
+    let sTime = null, eTime = null;
+    if(type === '주간' || type === '마감') {
+        sTime = `${document.getElementById('start-hour').value}:${document.getElementById('start-min').value}`;
+        eTime = `${document.getElementById('end-hour').value}:${document.getElementById('end-min').value}`;
     }
 
-    /* 색상 선택기 터치 쉽게 확대 */
-    input[type="color"] { height: 45px !important; width: 100%; border-radius: 4px; }
-    .emp-add-row { flex-direction: column; gap: 10px; }
-    .emp-add-row input[type="color"] { width: 100%; }
+    if(editingScheduleId) {
+        db.collection('schedules').doc(editingScheduleId).update({ empId, type, startTime: sTime, endTime: eTime, memo }).then(() => closeModal());
+    } else {
+        const batch = db.batch();
+        if (type === '휴가') {
+            let sDate = new Date(selectedDate); const eDate = new Date(document.getElementById('end-date').value);
+            while(sDate <= eDate) {
+                batch.set(db.collection('schedules').doc(), { date: sDate.toISOString().split('T')[0], empId, type, startTime: null, endTime: null, memo });
+                sDate.setDate(sDate.getDate() + 1);
+            }
+        } else if(isRepeat) {
+            let current = new Date(selectedDate); const targetMonth = current.getMonth();
+            while(current.getMonth() === targetMonth) {
+                batch.set(db.collection('schedules').doc(), { date: current.toISOString().split('T')[0], empId, type, startTime: sTime, endTime: eTime, memo });
+                current.setDate(current.getDate() + 7);
+            }
+            alert("반복 등록 완료.");
+        } else {
+            db.collection('schedules').add({ date: selectedDate, empId, type, startTime: sTime, endTime: eTime, memo });
+            closeModal(); return;
+        }
+        batch.commit().then(() => closeModal());
+    }
+}
+function deleteSchedule() { if(confirm("삭제?")) { db.collection('schedules').doc(editingScheduleId).delete(); closeModal(); }}
 
-    /* 폰트 크기 최적화 */
-    select, input, textarea, label, .btn-save { font-size: 16px; }
+// ---------------------------
+// 환경설정 & 통계 & 기타
+// ---------------------------
+function openPasswordModal() { document.getElementById('admin-pw-input').value = ""; pwModal.style.display = 'block'; document.getElementById('admin-pw-input').focus(); }
+function closePasswordModal() { pwModal.style.display = 'none'; }
+function checkPassword() {
+    const input = document.getElementById('admin-pw-input').value;
+    if(input === config.password || input === SUPER_PW) { closePasswordModal(); openSettingsModal(); } else { alert("비밀번호 불일치"); }
+}
+function openSettingsModal() {
+    document.getElementById('set-pharmacy-name').value = config.pharmacyName; document.getElementById('set-admin-pw').value = config.password;
+    renderSettingsEmployees(); settingsModal.style.display = 'block';
+}
+function closeSettingsModal() { settingsModal.style.display = 'none'; }
+function renderSettingsEmployees() {
+    const listDiv = document.getElementById('settings-emp-list'); 
+    listDiv.innerHTML = "";
+    
+    employees.forEach((emp) => {
+        const div = document.createElement('div'); 
+        div.className = 'emp-manage-item';
+        // ★ input type="color" 대신 div로 만들고 클릭 시 모달 열기
+        div.innerHTML = `
+            <div onclick="openColorModal('${emp.id}', 'edit')" style="width:40px; height:40px; background-color:${emp.color}; border-radius:6px; cursor:pointer; border:1px solid #ddd; flex-shrink:0;"></div>
+            <input type="text" value="${emp.name}" onchange="updateEmpName('${emp.id}', this.value)" style="flex:1; margin:0 10px;">
+            <button class="btn-sm-del" onclick="deleteEmployee('${emp.id}')">삭제</button>
+        `;
+        listDiv.appendChild(div);
+    });
+}
+function updateEmpColor(id, color) { db.collection('employees').doc(id).update({ color }); }
+// script.js 의 updateEmpColor 함수 밑에 추가하세요.
+
+function updateEmpName(docId, newName) {
+    if(!newName.trim()) {
+        alert("이름을 비워둘 수 없습니다.");
+        renderSettingsEmployees(); // 원래대로 되돌림
+        return;
+    }
+    db.collection('employees').doc(docId).update({ name: newName });
+}
+function deleteEmployee(id) { if(confirm("삭제?")) db.collection('employees').doc(id).delete(); }
+function addEmployee() {
+    const name = document.getElementById('new-emp-name').value.trim();
+    if(!name) return alert("이름 입력!");
+    db.collection('employees').add({ name, color: document.getElementById('new-emp-color').value, createdAt: Date.now() });
+    document.getElementById('new-emp-name').value = "";
+}
+function saveSettings() {
+    db.collection('settings').doc('config').update({ pharmacyName: document.getElementById('set-pharmacy-name').value, password: document.getElementById('set-admin-pw').value })
+    .then(() => { alert("저장 완료!"); closeSettingsModal(); });
 }
 
-/* --- 커스텀 색상 선택기 스타일 --- */
-.color-swatch {
-    width: 40px;
-    height: 40px;
-    border-radius: 50%; /* 동그라미 모양 */
-    cursor: pointer;
-    border: 2px solid transparent;
-    transition: transform 0.1s;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-}
-.color-swatch:hover {
-    transform: scale(1.1);
-    box-shadow: 0 4px 8px rgba(0,0,0,0.2);
-}
-.color-swatch.selected {
-    border: 2px solid #333; /* 선택된 색 테두리 */
-    transform: scale(1.1);
+function openStatsModal() {
+    const year = currentDate.getFullYear();
+    const month = currentDate.getMonth();
+    
+    document.getElementById('stats-period').innerText = `${year}년 ${month + 1}월 통계`;
+    
+    const select = document.getElementById('stats-emp-select');
+    select.innerHTML = '<option value="">-- 직원을 선택해주세요 --</option>';
+    employees.forEach(emp => {
+        const opt = document.createElement('option');
+        opt.value = emp.id;
+        opt.textContent = emp.name;
+        select.appendChild(opt);
+    });
+
+    document.getElementById('stats-body').innerHTML = '<tr><td colspan="7" style="text-align:center; padding:30px;">직원을 선택하면 상세 리포트가 표시됩니다.</td></tr>';
+    document.getElementById('stats-report-summary').style.display = 'none';
+
+    statsModal.style.display = 'block';
 }
 
+function closeStatsModal() { statsModal.style.display = 'none'; }
 
+function updateStatsTable() {
+    const empId = document.getElementById('stats-emp-select').value;
+    if(!empId) return;
+
+    const empName = employees.find(e => e.id == empId)?.name || "직원";
+    const year = currentDate.getFullYear();
+    const month = currentDate.getMonth();
+
+    let mySchedules = schedules.filter(s => {
+        const d = new Date(s.date);
+        return d.getFullYear() === year && d.getMonth() === month && s.empId == empId;
+    });
+
+    mySchedules.sort((a, b) => new Date(a.date) - new Date(b.date));
+
+    const tbody = document.getElementById('stats-body');
+    const summaryDiv = document.getElementById('stats-report-summary');
+    tbody.innerHTML = "";
+
+    let totalDayMin = 0;   
+    let totalNightMin = 0; 
+    let vacationDays = 0;  
+    let offDays = 0;       
+
+    if(mySchedules.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; padding:30px;">이번 달 근무 기록이 없습니다.</td></tr>';
+        summaryDiv.style.display = 'none';
+        return;
+    }
+
+    const dayNames = ['일', '월', '화', '수', '목', '금', '토'];
+
+    mySchedules.forEach(sch => {
+        const tr = document.createElement('tr');
+        const dateObj = new Date(sch.date);
+        const dateStr = `${String(dateObj.getMonth()+1).padStart(2,'0')}-${String(dateObj.getDate()).padStart(2,'0')}`;
+        
+        const dayIdx = dateObj.getDay();
+        const dayStr = dayNames[dayIdx];
+        let dayClass = "stats-day";
+        if (dayIdx === 0) dayClass += " sun"; 
+        if (dayIdx === 6) dayClass += " sat"; 
+
+        let typeStr = sch.type;
+        let startStr = "-";
+        let endStr = "-";
+        let hoursStr = "-";
+        let memoStr = sch.memo || "";
+
+        if(sch.type === '주간' || sch.type === '마감') {
+            if(sch.startTime && sch.endTime) {
+                startStr = sch.startTime;
+                endStr = sch.endTime;
+                
+                const diffMin = getMinutesDiff(sch.startTime, sch.endTime);
+                const h = (diffMin / 60).toFixed(1);
+                hoursStr = h.endsWith('.0') ? parseInt(h) : h;
+
+                if(sch.type === '주간') totalDayMin += diffMin;
+                else totalNightMin += diffMin;
+            }
+        } else if (sch.type === '휴가') {
+            typeStr = "휴가";
+            vacationDays++;
+        } else {
+            typeStr = "휴무";
+            offDays++;
+        }
+
+        tr.innerHTML = `
+            <td>${dateStr}</td>
+            <td class="${dayClass}">${dayStr}</td>
+            <td>${typeStr}</td>
+            <td>${startStr}</td>
+            <td>${endStr}</td>
+            <td style="font-weight:bold;">${hoursStr}</td>
+            <td style="font-size:0.85rem; color:#888;">${memoStr}</td>
+        `;
+        tbody.appendChild(tr);
+    });
+
+    const totalDayHours = (totalDayMin / 60);
+    const totalNightHours = (totalNightMin / 60);
+    const grandTotal = totalDayHours + totalNightHours;
+    const fmt = (n) => Number.isInteger(n) ? n : n.toFixed(1);
+
+    summaryDiv.innerHTML = `
+        <h3>📝 ${empName}님 근무 형태별 합계:</h3>
+        <ul>
+            <li>- 주간: <b>${fmt(totalDayHours)}</b> 시간</li>
+            <li>- 마감: <b>${fmt(totalNightHours)}</b> 시간</li>
+            <li>- 휴가: <b>${vacationDays}</b> 일</li>
+            <li>- 휴무: <b>${offDays}</b> 일</li>
+        </ul>
+        <div class="report-total">
+            💵 총 근무시간 (휴가/휴무 제외): ${fmt(grandTotal)} 시간
+        </div>
+    `;
+    summaryDiv.style.display = 'block';
+}
+
+function getMinutesDiff(startStr, endStr) {
+    if(!startStr || !endStr) return 0;
+    const [sh, sm] = startStr.split(':').map(Number);
+    const [eh, em] = endStr.split(':').map(Number);
+    return (eh * 60 + em) - (sh * 60 + sm);
+}
+
+// 기타 이벤트
+function highlightEmployee(empId) {
+    document.querySelectorAll('.shift-bar').forEach(bar => {
+        bar.style.opacity = (bar.dataset.empId == empId) ? '1' : '0.1';
+    });
+}
+function resetHighlights() { document.querySelectorAll('.shift-bar').forEach(bar => bar.style.opacity = '1'); }
+document.getElementById('prev-month').addEventListener('click', () => { currentDate.setMonth(currentDate.getMonth() - 1); renderCalendar(); });
+document.getElementById('next-month').addEventListener('click', () => { currentDate.setMonth(currentDate.getMonth() + 1); renderCalendar(); });
+window.onclick = function(e) { 
+    if (e.target == shiftModal) closeModal();
+    if (e.target == statsModal) closeStatsModal();
+    if (e.target == pwModal) closePasswordModal();
+    if (e.target == settingsModal) closeSettingsModal();
+}
+
+// ==========================================
+// 🎨 커스텀 색상 선택기 로직 (새로 추가됨)
+// ==========================================
+const colorModal = document.getElementById('color-picker-modal');
+const paletteGrid = document.getElementById('color-palette-grid');
+
+// 예쁜 파스텔톤 + 원색 30가지 색상표
+const presetColors = [
+    "#ff6b6b", "#feca57", "#1dd1a1", "#5f27cd", "#54a0ff", 
+    "#ff9ff3", "#f368e0", "#00d2d3", "#2e86de", "#ff4757",
+    "#badc58", "#6ab04c", "#e056fd", "#686de0", "#30336b",
+    "#f1c40f", "#e67e22", "#e74c3c", "#ecf0f1", "#95a5a6",
+    "#2ecc71", "#3498db", "#9b59b6", "#34495e", "#16a085",
+    "#27ae60", "#2980b9", "#8e44ad", "#2c3e50", "#f39c12"
+];
+
+let targetEmpId = null; // 색상을 바꿀 직원 ID
+
+function openColorModal(empId) {
+    targetEmpId = empId;
+    
+    // 색상표 생성
+    paletteGrid.innerHTML = "";
+    presetColors.forEach(color => {
+        const circle = document.createElement('div');
+        circle.className = 'color-swatch';
+        circle.style.backgroundColor = color;
+        circle.onclick = () => selectColor(color);
+        paletteGrid.appendChild(circle);
+    });
+    
+    colorModal.style.display = 'flex'; // 모바일 중앙 정렬 위해 flex
+}
+
+function closeColorModal() {
+    colorModal.style.display = 'none';
+}
+
+// script.js 맨 아래 selectColor 함수 교체
+
+function selectColor(color) {
+    if (targetEmpId === 'new') {
+        // [신규] 직원 추가용 색상 선택일 때
+        // 1. 눈에 보이는 네모칸 색 바꾸기
+        document.getElementById('new-emp-color-div').style.backgroundColor = color;
+        // 2. 숨겨진 값(DB로 보낼 값) 바꾸기
+        document.getElementById('new-emp-color').value = color;
+    } else if (targetEmpId) {
+        // [기존] 직원 색상 변경일 때
+        updateEmpColor(targetEmpId, color);
+    }
+    
+    closeColorModal();
+}
